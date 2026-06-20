@@ -29,11 +29,27 @@ def main():
             error_code = 0
         else:
             error_code = 35
+        
+        response_body = (
+            struct.pack(">h", 0)      # error_code
 
+            + b"\x02"                # compact array length = 1+1
+
+            + struct.pack(">h", 18)   # api_key
+            + struct.pack(">h", 0)    # min_version
+            + struct.pack(">h", 4)    # max_version
+            + b"\x00"                # tag buffer
+
+            + struct.pack(">i", 0)    # throttle_time_ms
+            + b"\x00"                # tag buffer
+        )
+
+        message_size = 4 + len(response_body)
+        
         response = (
-            struct.pack(">i", 0)
+            struct.pack(">i", message_size)
             + struct.pack(">i", correlation_id)
-            + struct.pack(">h", error_code)
+            + response_body
         )
 
         conn.sendall(response)
