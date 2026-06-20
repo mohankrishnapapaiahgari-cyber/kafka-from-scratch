@@ -13,7 +13,11 @@ def main():
     conn, addr = server.accept()
 
     with conn:
-        request = conn.recv(1024)
+        while True:
+            request = conn.recv(1024)
+    
+    if not request:
+        return
 
         api_version = struct.unpack(
             ">h",
