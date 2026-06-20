@@ -9,27 +9,33 @@ def handle_client(conn):
             if not request:
                 break
 
-            api_version = struct.unpack(">h",request[6:8])[0]
-
-            correlation_id = struct.unpack(">i",request[8:12])[0]
+            api_version = struct.unpack(">h", request[6:8])[0]
+            correlation_id = struct.unpack(">i", request[8:12])[0]
 
             if 0 <= api_version <= 4:
                 error_code = 0
             else:
                 error_code = 35
-            
+
             response_body = (
                 struct.pack(">h", error_code)      # error_code
 
-                + b"\x02"                # compact array length = 1+1
+                + b"\x03"                          # compact array length = 2 + 1
 
-                + struct.pack(">h", 18)   # api_key
-                + struct.pack(">h", 0)    # min_version
-                + struct.pack(">h", 4)    # max_version
-                + b"\x00"                # tag buffer
+                # API 18 : ApiVersions
+                + struct.pack(">h", 18)
+                + struct.pack(">h", 0)
+                + struct.pack(">h", 4)
+                + b"\x00"
 
-                + struct.pack(">i", 0)    # throttle_time_ms
-                + b"\x00"                # tag buffer
+                # API 75 : DescribeTopicPartitions
+                + struct.pack(">h", 75)
+                + struct.pack(">h", 0)
+                + struct.pack(">h", 0)
+                + b"\x00"
+
+                + struct.pack(">i", 0)            # throttle_time_ms
+                + b"\x00"                         # tag buffer
             )
 
             message_size = 4 + len(response_body)
@@ -53,8 +59,14 @@ def main():
 
     while True:
         conn, addr = server.accept()
-        client_thread = threading.Thread(target=handle_client, args=(conn,))
+
+        client_thread = threading.Thread(
+            target=handle_client,
+            args=(conn,)
+        )
+
         client_thread.start()
+
 
 if __name__ == "__main__":
     main()
