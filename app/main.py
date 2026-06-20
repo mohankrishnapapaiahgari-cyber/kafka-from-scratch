@@ -31,7 +31,7 @@ def main():
             error_code = 35
         
         response_body = (
-            struct.pack(">h", 0)      # error_code
+            struct.pack(">h", error_code)      # error_code
 
             + b"\x02"                # compact array length = 1+1
 
@@ -45,7 +45,7 @@ def main():
         )
 
         message_size = 4 + len(response_body)
-        
+
         response = (
             struct.pack(">i", message_size)
             + struct.pack(">i", correlation_id)
