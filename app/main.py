@@ -15,9 +15,8 @@ def main():
     with conn:
         while True:
             request = conn.recv(1024)
-    
-    if not request:
-        break
+            if not request:
+                break
 
         api_version = struct.unpack(
             ">h",
