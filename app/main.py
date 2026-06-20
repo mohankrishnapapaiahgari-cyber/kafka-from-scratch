@@ -12,14 +12,20 @@ def main():
 
     conn, addr = server.accept()
 
-    conn.recv(1024)
+    with conn:
+        request = conn.recv(1024)
 
-    response = (
-        struct.pack(">i", 0) +
-        struct.pack(">i", 7)
-    )
+        correlation_id = struct.unpack(
+            ">i",
+            request[8:12]
+        )[0]
 
-    conn.sendall(response)
+        response = (
+            struct.pack(">i", 0) +
+            struct.pack(">i", correlation_id)
+        )
+
+        conn.sendall(response)
 
 
 if __name__ == "__main__":
