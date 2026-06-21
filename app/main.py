@@ -15,7 +15,9 @@ def handle_client(conn):
             api_version = struct.unpack(">h", request[6:8])[0]
             correlation_id = struct.unpack(">i", request[8:12])[0]
 
-            # ---------------- API VERSIONS ----------------
+            # --------------------------------------------------
+            # ApiVersions (API Key 18)
+            # --------------------------------------------------
             if api_key == 18:
 
                 if 0 <= api_version <= 4:
@@ -26,7 +28,7 @@ def handle_client(conn):
                 response_body = (
                     struct.pack(">h", error_code)
 
-                    + b"\x03"
+                    + b"\x03"  # compact array length = 2 + 1
 
                     # API 18
                     + struct.pack(">h", 18)
@@ -40,8 +42,8 @@ def handle_client(conn):
                     + struct.pack(">h", 0)
                     + b"\x00"
 
-                    + struct.pack(">i", 0)
-                    + b"\x00"
+                    + struct.pack(">i", 0)  # throttle_time_ms
+                    + b"\x00"               # tagged fields
                 )
 
                 message_size = 4 + len(response_body)
@@ -54,13 +56,29 @@ def handle_client(conn):
 
                 conn.sendall(response)
 
-            # ---------------- DESCRIBE TOPIC PARTITIONS ----------------
+            # --------------------------------------------------
+            # DescribeTopicPartitions (API Key 75)
+            # --------------------------------------------------
             elif api_key == 75:
 
-                # For this stage's test request:
-                # byte 27 = compact string length
-                topic_length = request[27] - 1
-                topic_name = request[28:28 + topic_length]
+                pos = 12
+
+                # client_id (COMPACT_STRING)
+                client_id_len = request[pos] - 1
+                pos += 1 + client_id_len
+
+                # header tagged fields
+                pos += 1
+
+                # topics compact array
+                topics_len = request[pos] - 1
+                pos += 1
+
+                # first topic name (COMPACT_STRING)
+                topic_name_len = request[pos] - 1
+                pos += 1
+
+                topic_name = request[pos:pos + topic_name_len]
 
                 response_body = (
                     struct.pack(">i", 0)      # throttle_time_ms
@@ -69,16 +87,16 @@ def handle_client(conn):
 
                     + struct.pack(">h", 3)   # UNKNOWN_TOPIC_OR_PARTITION
 
-                    + bytes([topic_length + 1])
+                    + bytes([topic_name_len + 1])
                     + topic_name
 
-                    + (b"\x00" * 16)         # UUID all zeros
+                    + (b"\x00" * 16)         # topic UUID
 
                     + b"\x00"                # is_internal = false
 
                     + b"\x01"                # empty partitions array
 
-                    + struct.pack(">i", 0)   # authorized operations
+                    + struct.pack(">i", 0)   # topic_authorized_operations
 
                     + b"\x00"                # topic tagged fields
 
@@ -89,7 +107,7 @@ def handle_client(conn):
 
                 response_header = (
                     struct.pack(">i", correlation_id)
-                    + b"\x00"                # header v1 tag buffer
+                    + b"\x00"                # response header v1 tagged fields
                 )
 
                 message_size = len(response_header) + len(response_body)
