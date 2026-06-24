@@ -6,7 +6,7 @@ import threading
 def handle_client(conn):
     with conn:
         while True:
-            request = conn.recv(1024)
+            request = conn.recv(4096)
 
             if not request:
                 break
@@ -24,7 +24,6 @@ def handle_client(conn):
 
                 response_body = (
                     struct.pack(">h", error_code)
-
                     + b"\x03"
 
                     # ApiVersions
@@ -58,63 +57,123 @@ def handle_client(conn):
             # -------------------------------------------------
             elif api_key == 75:
 
-                # Request format used by CodeCrafters VT6:
-                #
-                # 0-3   message size
-                # 4-5   api key
-                # 6-7   api version
-                # 8-11  correlation id
-                # 12-13 client id length
-                # ...   client id
-                # ...   tagged fields
-                # ...   topics array
-                #
                 pos = 12
 
-                client_id_len = struct.unpack(">h", request[pos:pos+2])[0]
+                client_id_len = struct.unpack(">h", request[pos:pos + 2])[0]
                 pos += 2 + client_id_len
 
-                # tagged fields after header
+                # tagged fields
                 pos += 1
 
                 # topics compact array length
                 pos += 1
 
-                # topic name compact string
+                # topic name
                 topic_name_len = request[pos] - 1
                 pos += 1
 
-                topic_name = request[pos:pos + topic_name_len]
+                topic_name = request[pos:pos + topic_name_len].decode()
+                pos += topic_name_len
 
                 response_header = (
                     struct.pack(">i", correlation_id)
                     + b"\x00"
                 )
 
-                response_body = (
-                    struct.pack(">i", 0)      # throttle_time_ms
+                # -------------------------------------------------
+                # Known topic
+                # -------------------------------------------------
 
-                    + b"\x02"                # topics array length = 1+1
+                if topic_name == "test-topic":
 
-                    + struct.pack(">h", 3)   # UNKNOWN_TOPIC_OR_PARTITION
+                    topic_uuid = bytes.fromhex(
+                        "00000000000040008000000000000091"
+                    )
 
-                    + bytes([topic_name_len + 1])
-                    + topic_name
+                    partitions = (
 
-                    + (b"\x00" * 16)         # UUID
+                        b"\x02"                      # compact array len = 1
 
-                    + b"\x00"                # is_internal
+                        + struct.pack(">h", 0)      # error code
 
-                    + b"\x01"                # empty partitions array
+                        + struct.pack(">i", 1)      # partition index
 
-                    + struct.pack(">i", 0)   # authorized operations
+                        + struct.pack(">i", 1)      # leader id
 
-                    + b"\x00"                # topic tagged fields
+                        + struct.pack(">i", 0)      # leader epoch
 
-                    + b"\xff"                # next_cursor = null
+                        + b"\x02"                   # replicas length
 
-                    + b"\x00"                # tagged fields
-                )
+                        + struct.pack(">i", 1)
+
+                        + b"\x02"                   # ISR length
+
+                        + struct.pack(">i", 1)
+
+                        + b"\x01"                   # eligible leaders
+
+                        + b"\x01"                   # last known ELR
+
+                        + b"\x00"                   # tagged fields
+                    )
+
+                    response_body = (
+
+                        struct.pack(">i", 0)
+
+                        + b"\x02"
+
+                        + struct.pack(">h", 0)
+
+                        + bytes([len(topic_name) + 1])
+                        + topic_name.encode()
+
+                        + topic_uuid
+
+                        + b"\x00"
+
+                        + partitions
+
+                        + struct.pack(">i", 0)
+
+                        + b"\x00"
+
+                        + b"\xff"
+
+                        + b"\x00"
+                    )
+
+                # -------------------------------------------------
+                # Unknown topic
+                # -------------------------------------------------
+
+                else:
+
+                    response_body = (
+
+                        struct.pack(">i", 0)
+
+                        + b"\x02"
+
+                        + struct.pack(">h", 3)
+
+                        + bytes([len(topic_name) + 1])
+                        + topic_name.encode()
+
+                        + (b"\x00" * 16)
+
+                        + b"\x00"
+
+                        + b"\x01"
+
+                        + struct.pack(">i", 0)
+
+                        + b"\x00"
+
+                        + b"\xff"
+
+                        + b"\x00"
+                    )
 
                 message_size = len(response_header) + len(response_body)
 
@@ -140,7 +199,8 @@ def main():
 
         threading.Thread(
             target=handle_client,
-            args=(conn,)
+            args=(conn,),
+            daemon=True
         ).start()
 
 
