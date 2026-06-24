@@ -4,10 +4,6 @@ import threading
 import os
 
 
-# ─────────────────────────────────────────
-# Varint helpers
-# ─────────────────────────────────────────
-
 def read_varint(data, pos):
     result = 0
     shift = 0
@@ -27,10 +23,6 @@ def read_signed_varint(data, pos):
     return val, pos
 
 
-# ─────────────────────────────────────────
-# Metadata log parser
-# ─────────────────────────────────────────
-
 def parse_metadata_log():
     log_path = "/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"
 
@@ -48,11 +40,10 @@ def parse_metadata_log():
         if pos + 61 > len(data):
             break
 
-        batch_length = struct.unpack_from(">i", data, pos + 8)[0]
-        batch_end    = pos + 8 + 4 + batch_length
-
+        batch_length  = struct.unpack_from(">i", data, pos + 8)[0]
+        batch_end     = pos + 8 + 4 + batch_length
         records_count = struct.unpack_from(">i", data, pos + 57)[0]
-        rec_pos = pos + 61
+        rec_pos       = pos + 61
 
         for _ in range(records_count):
             if rec_pos >= batch_end:
@@ -61,9 +52,9 @@ def parse_metadata_log():
             rec_len, rec_pos = read_signed_varint(data, rec_pos)
             rec_end = rec_pos + rec_len
 
-            rec_pos += 1                              # attributes
-            _, rec_pos = read_signed_varint(data, rec_pos)  # timestamp_delta
-            _, rec_pos = read_signed_varint(data, rec_pos)  # offset_delta
+            rec_pos += 1
+            _, rec_pos = read_signed_varint(data, rec_pos)
+            _, rec_pos = read_signed_varint(data, rec_pos)
 
             key_len, rec_pos = read_signed_varint(data, rec_pos)
             if key_len > 0:
@@ -75,7 +66,7 @@ def parse_metadata_log():
                 parse_record_value(value, topic_name_to_uuid, topic_uuid_to_parts)
 
             rec_pos += val_len
-            _, rec_pos = read_varint(data, rec_pos)  # headers count
+            _, rec_pos = read_varint(data, rec_pos)
 
         pos = batch_end
 
@@ -93,11 +84,11 @@ def parse_record_value(value, topic_name_to_uuid, topic_uuid_to_parts):
 
 
 def parse_topic_record(value, topic_name_to_uuid, topic_uuid_to_parts):
-    pos = 3
+    pos        = 3
     name_len   = value[pos] - 1
-    pos += 1
+    pos       += 1
     topic_name = value[pos: pos + name_len].decode("utf-8")
-    pos += name_len
+    pos       += name_len
     topic_uuid = value[pos: pos + 16]
 
     topic_name_to_uuid[topic_name] = topic_uuid
@@ -106,17 +97,13 @@ def parse_topic_record(value, topic_name_to_uuid, topic_uuid_to_parts):
 
 
 def parse_partition_record(value, topic_uuid_to_parts):
-    pos = 3
+    pos          = 3
     partition_id = struct.unpack_from(">i", value, pos)[0]; pos += 4
     topic_uuid   = value[pos: pos + 16];                    pos += 16
 
-    # skip replica array
     count, pos = read_varint(value, pos); pos += (count - 1) * 4
-    # skip isr array
     count, pos = read_varint(value, pos); pos += (count - 1) * 4
-    # skip removing replicas
     count, pos = read_varint(value, pos); pos += (count - 1) * 4
-    # skip adding replicas
     count, pos = read_varint(value, pos); pos += (count - 1) * 4
 
     leader       = struct.unpack_from(">i", value, pos)[0]; pos += 4
@@ -126,80 +113,67 @@ def parse_partition_record(value, topic_uuid_to_parts):
         topic_uuid_to_parts[topic_uuid] = []
 
     topic_uuid_to_parts[topic_uuid].append({
-        "partition_id":  partition_id,
-        "leader":        leader,
-        "leader_epoch":  leader_epoch,
+        "partition_id": partition_id,
+        "leader":       leader,
+        "leader_epoch": leader_epoch,
     })
 
 
-# ─────────────────────────────────────────
-# Response builders
-# ─────────────────────────────────────────
-
 def build_single_topic_entry(topic_name, topic_name_to_uuid, topic_uuid_to_parts):
-    """Build the bytes for one topic entry inside the topics array."""
     name_bytes = topic_name.encode("utf-8")
 
     if topic_name not in topic_name_to_uuid:
-        # Unknown topic
         return (
-            struct.pack(">h", 3)              # error = UNKNOWN_TOPIC_OR_PARTITION
-            + bytes([len(name_bytes) + 1])    # compact string length
+            struct.pack(">h", 3)
+            + bytes([len(name_bytes) + 1])
             + name_bytes
-            + (b"\x00" * 16)                 # UUID = all zeros
-            + b"\x00"                         # is_internal
-            + b"\x01"                         # empty partitions array
-            + struct.pack(">i", 0)            # authorized_operations
-            + b"\x00"                         # topic tagged fields
+            + (b"\x00" * 16)
+            + b"\x00"
+            + b"\x01"
+            + struct.pack(">i", 0)
+            + b"\x00"
         )
 
-    # Known topic
     topic_uuid = topic_name_to_uuid[topic_name]
     partitions = sorted(
         topic_uuid_to_parts.get(topic_uuid, []),
-        key=lambda p: p["partition_id"]       # sort partitions by index
+        key=lambda p: p["partition_id"]
     )
 
     partition_data = b""
     for p in partitions:
         partition_data += (
-            struct.pack(">h", 0)              # error_code = NONE
+            struct.pack(">h", 0)
             + struct.pack(">i", p["partition_id"])
             + struct.pack(">i", p["leader"])
             + struct.pack(">i", p["leader_epoch"])
-            + b"\x02" + struct.pack(">i", 1) # replicas compact array [1]
-            + b"\x02" + struct.pack(">i", 1) # isr compact array [1]
-            + b"\x01"                         # eligible_leader_replicas (empty)
-            + b"\x01"                         # last_known_elr (empty)
-            + b"\x01"                         # offline_replicas (empty)
-            + b"\x00"                         # partition tagged fields
+            + b"\x02" + struct.pack(">i", 1)
+            + b"\x02" + struct.pack(">i", 1)
+            + b"\x01"
+            + b"\x01"
+            + b"\x01"
+            + b"\x00"
         )
 
     parts_array = bytes([len(partitions) + 1]) + partition_data
 
     return (
-        struct.pack(">h", 0)                  # error_code = NONE
-        + bytes([len(name_bytes) + 1])        # compact string length
+        struct.pack(">h", 0)
+        + bytes([len(name_bytes) + 1])
         + name_bytes
-        + topic_uuid                          # 16 byte UUID
-        + b"\x00"                             # is_internal
+        + topic_uuid
+        + b"\x00"
         + parts_array
-        + struct.pack(">i", 0x00000df8)       # authorized_operations
-        + b"\x00"                             # topic tagged fields
+        + struct.pack(">i", 0x00000df8)
+        + b"\x00"
     )
 
 
 def build_describe_topic_partitions_response(correlation_id, topic_names,
                                               topic_name_to_uuid,
                                               topic_uuid_to_parts):
-    """
-    Build full DescribeTopicPartitions response for a LIST of topic names.
-    Topics must be sorted alphabetically.
-    """
-    # ── Sort topics alphabetically ───────────────────────────
     sorted_names = sorted(topic_names)
 
-    # ── Build each topic entry ───────────────────────────────
     topics_data = b""
     for name in sorted_names:
         topics_data += build_single_topic_entry(
@@ -208,15 +182,15 @@ def build_describe_topic_partitions_response(correlation_id, topic_names,
 
     response_header = (
         struct.pack(">i", correlation_id)
-        + b"\x00"                             # tagged fields
+        + b"\x00"
     )
 
     response_body = (
-        struct.pack(">i", 0)                  # throttle_time_ms
-        + bytes([len(sorted_names) + 1])      # compact array length = N + 1
+        struct.pack(">i", 0)
+        + bytes([len(sorted_names) + 1])
         + topics_data
-        + b"\xff"                             # next_cursor = null
-        + b"\x00"                             # response tagged fields
+        + b"\xff"
+        + b"\x00"
     )
 
     message_size = len(response_header) + len(response_body)
@@ -227,44 +201,27 @@ def build_describe_topic_partitions_response(correlation_id, topic_names,
     )
 
 
-# ─────────────────────────────────────────
-# Request parser for DescribeTopicPartitions
-# ─────────────────────────────────────────
-
 def parse_topic_names_from_request(request):
-    """
-    Parse ALL topic names from a DescribeTopicPartitions request.
-    Returns a list of topic name strings.
-    """
     pos = 12
 
-    # client_id (int16 length + bytes)
     client_id_len = struct.unpack(">h", request[pos: pos + 2])[0]
     pos += 2 + max(client_id_len, 0)
-
-    # tagged fields after request header
     pos += 1
 
-    # topics compact array length (varint): stored as actual_count + 1
     topics_array_len, pos = read_varint(request, pos)
     num_topics = topics_array_len - 1
 
     topic_names = []
     for _ in range(num_topics):
-        # topic name compact string: stored length = actual + 1
-        name_len = request[pos] - 1
-        pos += 1
+        name_len   = request[pos] - 1
+        pos       += 1
         topic_name = request[pos: pos + name_len].decode("utf-8")
-        pos += name_len
-        pos += 1    # topic tagged fields
+        pos       += name_len
+        pos       += 1
         topic_names.append(topic_name)
 
     return topic_names
 
-
-# ─────────────────────────────────────────
-# Client handler
-# ─────────────────────────────────────────
 
 def handle_client(conn):
     topic_name_to_uuid, topic_uuid_to_parts = parse_metadata_log()
@@ -275,28 +232,38 @@ def handle_client(conn):
             if not raw or len(raw) < 4:
                 break
 
-            msg_size = struct.unpack(">i", raw)[0]
-            request  = raw + conn.recv(msg_size)
-
+            msg_size       = struct.unpack(">i", raw)[0]
+            request        = raw + conn.recv(msg_size)
             api_key        = struct.unpack(">h", request[4:6])[0]
             api_version    = struct.unpack(">h", request[6:8])[0]
             correlation_id = struct.unpack(">i", request[8:12])[0]
 
-            # ── ApiVersions ──────────────────────────────────
+            # ── ApiVersions (key=18) ─────────────────────────
             if api_key == 18:
                 error_code = 0 if 0 <= api_version <= 4 else 35
 
                 response_body = (
                     struct.pack(">h", error_code)
-                    + b"\x03"
+                    + b"\x04"                        # 3 APIs = compact length 4
+
+                    # ApiVersions
                     + struct.pack(">h", 18)
                     + struct.pack(">h", 0)
                     + struct.pack(">h", 4)
                     + b"\x00"
+
+                    # Fetch
+                    + struct.pack(">h", 1)
+                    + struct.pack(">h", 0)
+                    + struct.pack(">h", 16)
+                    + b"\x00"
+
+                    # DescribeTopicPartitions
                     + struct.pack(">h", 75)
                     + struct.pack(">h", 0)
                     + struct.pack(">h", 0)
                     + b"\x00"
+
                     + struct.pack(">i", 0)
                     + b"\x00"
                 )
@@ -309,20 +276,15 @@ def handle_client(conn):
                 )
                 conn.sendall(response)
 
-            # ── DescribeTopicPartitions ──────────────────────
+            # ── DescribeTopicPartitions (key=75) ─────────────
             elif api_key == 75:
                 topic_names = parse_topic_names_from_request(request)
-
-                response = build_describe_topic_partitions_response(
+                response    = build_describe_topic_partitions_response(
                     correlation_id, topic_names,
                     topic_name_to_uuid, topic_uuid_to_parts
                 )
                 conn.sendall(response)
 
-
-# ─────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────
 
 def main():
     print("Logs from your program will appear here!")
