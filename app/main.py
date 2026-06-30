@@ -118,6 +118,32 @@ def parse_partition_record(value, topic_uuid_to_parts):
         "leader_epoch": leader_epoch,
     })
 
+def parse_fetch_request(request):
+    """Extract topic_id from a Fetch (v16) request. Returns 16-byte UUID or None."""
+    pos = 12
+
+    client_id_len = struct.unpack(">h", request[pos: pos + 2])[0]
+    pos += 2 + max(client_id_len, 0)
+    pos += 1  # tagged fields after header
+
+    pos += 4   # max_wait_ms
+    pos += 4   # min_bytes
+    pos += 4   # max_bytes
+    pos += 1   # isolation_level
+    pos += 4   # session_id
+    pos += 4   # session_epoch
+
+    topics_array_len, pos = read_varint(request, pos)
+    num_topics = topics_array_len - 1
+
+    if num_topics == 0:
+        return None
+
+    # we only handle the first topic for this stage
+    topic_id = request[pos: pos + 16]
+    pos += 16
+
+    return topic_id
 
 def build_single_topic_entry(topic_name, topic_name_to_uuid, topic_uuid_to_parts):
     name_bytes = topic_name.encode("utf-8")
@@ -284,17 +310,47 @@ def handle_client(conn):
 
             # ── Fetch (key=1) ─────────────────────────────────
             elif api_key == 1:
+                topic_id = parse_fetch_request(request)
+
                 response_header = (
                     struct.pack(">i", correlation_id)
                     + b"\x00"
                 )
 
+                if topic_id is None:
+                    # no topics requested
+                    responses_data = b"\x01"   # empty array
+                else:
+                    partition_entry = (
+                        struct.pack(">i", 0)        # partition_index = 0
+                        + struct.pack(">h", 100)    # error_code = UNKNOWN_TOPIC_ID
+                        + struct.pack(">q", 0)      # high_watermark
+                        + struct.pack(">q", 0)      # last_stable_offset
+                        + struct.pack(">q", 0)      # log_start_offset
+                        + b"\x01"                   # aborted_transactions (empty)
+                        + struct.pack(">i", 0)      # preferred_read_replica
+                        + b"\x01"                   # records (empty COMPACT_RECORDS)
+                        + b"\x00"                   # partition tagged fields
+                    )
+
+                    topic_response = (
+                        topic_id                    # 16 byte topic_id
+                        + b"\x02"                   # partitions array len = 1+1
+                        + partition_entry
+                        + b"\x00"                   # topic tagged fields
+                    )
+
+                    responses_data = (
+                        b"\x02"                     # responses array len = 1+1
+                        + topic_response
+                    )
+
                 response_body = (
-                    struct.pack(">i", 0)
-                    + struct.pack(">h", 0)
-                    + struct.pack(">i", 0)
-                    + b"\x01"
-                    + b"\x00"
+                    struct.pack(">i", 0)            # throttle_time_ms
+                    + struct.pack(">h", 0)          # error_code = NONE
+                    + struct.pack(">i", 0)          # session_id
+                    + responses_data
+                    + b"\x00"                       # tagged fields
                 )
 
                 message_size = len(response_header) + len(response_body)
