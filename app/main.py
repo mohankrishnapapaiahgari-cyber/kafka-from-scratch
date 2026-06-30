@@ -244,21 +244,18 @@ def handle_client(conn):
 
                 response_body = (
                     struct.pack(">h", error_code)
-                    + b"\x04"                        # 3 APIs = compact length 4
+                    + b"\x04"
 
-                    # ApiVersions
                     + struct.pack(">h", 18)
                     + struct.pack(">h", 0)
                     + struct.pack(">h", 4)
                     + b"\x00"
 
-                    # Fetch
                     + struct.pack(">h", 1)
                     + struct.pack(">h", 0)
                     + struct.pack(">h", 16)
                     + b"\x00"
 
-                    # DescribeTopicPartitions
                     + struct.pack(">h", 75)
                     + struct.pack(">h", 0)
                     + struct.pack(">h", 0)
@@ -285,6 +282,28 @@ def handle_client(conn):
                 )
                 conn.sendall(response)
 
+            # ── Fetch (key=1) ─────────────────────────────────
+            elif api_key == 1:
+                response_header = (
+                    struct.pack(">i", correlation_id)
+                    + b"\x00"
+                )
+
+                response_body = (
+                    struct.pack(">i", 0)
+                    + struct.pack(">h", 0)
+                    + struct.pack(">i", 0)
+                    + b"\x01"
+                    + b"\x00"
+                )
+
+                message_size = len(response_header) + len(response_body)
+                response = (
+                    struct.pack(">i", message_size)
+                    + response_header
+                    + response_body
+                )
+                conn.sendall(response)
 
 def main():
     print("Logs from your program will appear here!")
