@@ -22,6 +22,8 @@ def read_signed_varint(data, pos):
     val = (val >> 1) ^ -(val & 1)
     return val, pos
 
+def build_uuid_to_name(topic_name_to_uuid):
+    return {uuid: name for name, uuid in topic_name_to_uuid.items()}
 
 def parse_metadata_log():
     log_path = "/tmp/kraft-combined-logs/__cluster_metadata-0/00000000000000000000.log"
@@ -318,23 +320,38 @@ def handle_client(conn):
                 )
 
                 if topic_id is None:
-                    # no topics requested
                     responses_data = b"\x01"   # empty array
                 else:
-                    partition_entry = (
-                        struct.pack(">i", 0)        # partition_index = 0
-                        + struct.pack(">h", 100)    # error_code = UNKNOWN_TOPIC_ID
-                        + struct.pack(">q", 0)      # high_watermark
-                        + struct.pack(">q", 0)      # last_stable_offset
-                        + struct.pack(">q", 0)      # log_start_offset
-                        + b"\x01"                   # aborted_transactions (empty)
-                        + struct.pack(">i", 0)      # preferred_read_replica
-                        + b"\x01"                   # records (empty COMPACT_RECORDS)
-                        + b"\x00"                   # partition tagged fields
-                    )
+                    uuid_to_name = build_uuid_to_name(topic_name_to_uuid)
+                    is_known = topic_id in uuid_to_name
+
+                    if is_known:
+                        partition_entry = (
+                            struct.pack(">i", 0)        # partition_index = 0
+                            + struct.pack(">h", 0)      # error_code = NONE
+                            + struct.pack(">q", 0)      # high_watermark
+                            + struct.pack(">q", 0)      # last_stable_offset
+                            + struct.pack(">q", 0)      # log_start_offset
+                            + b"\x01"                   # aborted_transactions (empty)
+                            + struct.pack(">i", 0)      # preferred_read_replica
+                            + b"\x01"                   # records (empty COMPACT_RECORDS)
+                            + b"\x00"                   # partition tagged fields
+                        )
+                    else:
+                        partition_entry = (
+                            struct.pack(">i", 0)        # partition_index = 0
+                            + struct.pack(">h", 100)    # error_code = UNKNOWN_TOPIC_ID
+                            + struct.pack(">q", 0)
+                            + struct.pack(">q", 0)
+                            + struct.pack(">q", 0)
+                            + b"\x01"
+                            + struct.pack(">i", 0)
+                            + b"\x01"
+                            + b"\x00"
+                        )
 
                     topic_response = (
-                        topic_id                    # 16 byte topic_id
+                        topic_id
                         + b"\x02"                   # partitions array len = 1+1
                         + partition_entry
                         + b"\x00"                   # topic tagged fields
